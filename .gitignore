@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.DS_Store
+
+# Downloaded and generated data stay local. The repo keeps code and instructions.
+*.csv
+*.parquet
+data/raw/**
+data/processed/**
+data/curated/**
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/curated/.gitkeep
+
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc

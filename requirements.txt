@@ -1,0 +1,7 @@
+pyspark>=3.5.1,<4
+openai>=1.40.0
+rank-bm25>=0.2.2
+numpy>=1.26
+python-dotenv>=1.0.1
+jupyter>=1.1.0
+nbconvert>=7.16.0
