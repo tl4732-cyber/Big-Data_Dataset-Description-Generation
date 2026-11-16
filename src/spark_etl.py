@@ -77,18 +77,21 @@ def column_role(name: str) -> str:
 
 def start_spark() -> SparkSession:
     return (
-        SparkSession.builder.master("local[*]")
+        SparkSession.builder
         .appName("NYC_311_AutoDDG_Pipeline")
+        .master('local[*]')
+        .config('spark.submit.deployMode', 'client')
         .config("spark.driver.memory", SPARK_DRIVER_MEMORY)
-        .config("spark.sql.shuffle.partitions", SPARK_SHUFFLE_PARTITIONS)
-        .config("spark.sql.session.timeZone", "America/New_York")
-        .config("spark.ui.showConsoleProgress", "false")
+#         .config("spark.sql.shuffle.partitions", SPARK_SHUFFLE_PARTITIONS)
+#         .config("spark.sql.session.timeZone", "America/New_York")
+#         .config("spark.ui.showConsoleProgress", "false")
         .getOrCreate()
     )
 
 
 def _csv(spark: SparkSession, directory) -> DataFrame:
-    parts = sorted(str(path) for path in directory.glob("part-*.csv"))
+    parts = sorted(str(path.resolve().as_uri()) for path in directory.glob("part-*.csv"))
+#     parts2 = [part.resolve().as_uri() for part in parts]
     if not parts:
         raise FileNotFoundError(
             f"No CSV pages in {directory}. Run the Milestone 1 download cell first."
@@ -259,19 +262,21 @@ def resolution_pattern(joined: DataFrame, limit: int = 10) -> list[dict]:
 
 
 def write_curated(joined: DataFrame) -> str:
+    target = CURATED.resolve().as_uri()
     (
         joined.write.mode("overwrite")
         .partitionBy("year", "month")
-        .parquet(str(CURATED))
+        .parquet(str(target))
     )
-    return str(CURATED)
+    return str(target)
 
 
 def partition_counts(spark: SparkSession) -> list[dict]:
-    frame = spark.read.parquet(str(CURATED))
+    target = CURATED.resolve().as_uri()
+    frame = spark.read.parquet(str(target))
     rows = frame.groupBy("year", "month").count().orderBy("year", "month").collect()
     counts = [
         {"year": row["year"], "month": row["month"], "rows": int(row["count"])} for row in rows
     ]
-    write_json(PROCESSED / "m2_partitions.json", {"partitions": counts, "path": str(CURATED)})
+    write_json(PROCESSED / "m2_partitions.json", {"partitions": counts, "path": str(target)})
     return counts
