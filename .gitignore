@@ -17,5 +17,6 @@ data/curated/**
 
 spark-warehouse/
 metastore_db/
+notebooks/keys.txt
 derby.log
 *.crc
