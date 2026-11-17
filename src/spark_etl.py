@@ -90,8 +90,8 @@ def start_spark() -> SparkSession:
 
 
 def _csv(spark: SparkSession, directory) -> DataFrame:
-    parts = sorted(str(path.resolve().as_uri()) for path in directory.glob("part-*.csv"))
-#     parts2 = [part.resolve().as_uri() for part in parts]
+    # Plain paths. as_uri() encodes spaces as %20, and Spark then looks for a file that does not exist.
+    parts = sorted(str(path.resolve()) for path in directory.glob("part-*.csv"))
     if not parts:
         raise FileNotFoundError(
             f"No CSV pages in {directory}. Run the Milestone 1 download cell first."
@@ -262,18 +262,18 @@ def resolution_pattern(joined: DataFrame, limit: int = 10) -> list[dict]:
 
 
 def write_curated(joined: DataFrame) -> str:
-    target = CURATED.resolve().as_uri()
+    target = str(CURATED.resolve())
     (
         joined.write.mode("overwrite")
         .partitionBy("year", "month")
-        .parquet(str(target))
+        .parquet(target)
     )
-    return str(target)
+    return target
 
 
 def partition_counts(spark: SparkSession) -> list[dict]:
-    target = CURATED.resolve().as_uri()
-    frame = spark.read.parquet(str(target))
+    target = str(CURATED.resolve())
+    frame = spark.read.parquet(target)
     rows = frame.groupBy("year", "month").count().orderBy("year", "month").collect()
     counts = [
         {"year": row["year"], "month": row["month"], "rows": int(row["count"])} for row in rows

@@ -14,6 +14,7 @@ load_dotenv(ROOT / ".env")
 DATA = ROOT / "data"
 RAW_311 = DATA / "raw" / "fact_311"
 RAW_ZCTA = DATA / "raw" / "dim_zcta"
+RAW_AUCTUS = DATA / "raw" / "auctus_places_zcta"
 PROCESSED = DATA / "processed"
 CURATED = DATA / "curated" / "nyc_311_zcta_enriched"
 
@@ -22,6 +23,11 @@ ZCTA_ID = "35j5-n34v"
 SODA_ROOT = "https://data.cityofnewyork.us/resource"
 VIEW_ROOT = "https://data.cityofnewyork.us/api/views"
 PORTAL_PAGE = "https://data.cityofnewyork.us/d"
+AUCTUS_SEARCH_URL = "https://auctus.vida-nyu.org/api/v1/search"
+
+# CDC PLACES 2024 ZCTA estimates, indexed by Auctus. ZCTA5 joins to 311 clean_zip.
+AUCTUS_ID = "datamart.socrata.data-cdc-gov.kee5-23sr"
+AUCTUS_KEYWORDS = "PLACES ZCTA Data GIS Friendly 2024 release"
 
 # Portal datasets used as the search corpus. 311 is the large Spark case.
 # The others supply human-authored descriptions so retrieval has distractors.
@@ -58,6 +64,10 @@ SEARCH_QUERIES = [
     {
         "query": "zip code tabulation area centroid latitude longitude",
         "relevant_id": ZCTA_ID,
+    },
+    {
+        "query": "cdc places zip code tabulation area health prevalence american community survey",
+        "relevant_id": AUCTUS_ID,
     },
 ]
 

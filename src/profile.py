@@ -5,7 +5,7 @@ from __future__ import annotations
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import approx_count_distinct, col, count, when
 
-from src.config import END_DATE, FACT_ID, PROCESSED, START_DATE, write_json
+from src.config import AUCTUS_ID, END_DATE, FACT_ID, PROCESSED, RAW_AUCTUS, START_DATE, write_json
 from src.spark_etl import AUDIT_COLUMNS, column_role
 
 DETAIL_COLUMNS = [
@@ -132,3 +132,70 @@ def build_profile(
     }
     write_json(PROCESSED / "content_profile.json", profile)
     return profile
+
+
+def build_auctus_profile(frame: DataFrame) -> dict:
+    """Profile the full CDC PLACES ZCTA table indexed by Auctus."""
+    total = frame.count()
+    key = "ZCTA5" if "ZCTA5" in frame.columns else None
+    measure_columns = [
+        name
+        for name in ("TotalPopulation", "TotalPop18plus", "ACCESS2_CrudePrev", "ARTHRITIS_CrudePrev", "BPHIGH_CrudePrev")
+        if name in frame.columns
+    ]
+    distinct = None
+    null_key = None
+    if key:
+        distinct = frame.select(approx_count_distinct(col(key)).alias("n")).collect()[0]["n"]
+        null_key = frame.select(
+            count(when(col(key).isNull() | (col(key) == ""), key)).alias("n")
+        ).collect()[0]["n"]
+
+    measures = {}
+    for name in measure_columns:
+        numeric = frame.withColumn(name, col(name).cast("double"))
+        row = numeric.selectExpr(
+            f"min({name}) as min_v",
+            f"max({name}) as max_v",
+            f"avg({name}) as avg_v",
+        ).collect()[0]
+        measures[name] = {
+            "min": None if row["min_v"] is None else round(float(row["min_v"]), 2),
+            "max": None if row["max_v"] is None else round(float(row["max_v"]), 2),
+            "mean": None if row["avg_v"] is None else round(float(row["avg_v"]), 2),
+        }
+
+    profile = {
+        "dataset_name": "PLACES: ZCTA Data (GIS Friendly Format), 2024 release",
+        "source_dataset_id": AUCTUS_ID,
+        "source": "auctus",
+        "source_page": "https://data.cdc.gov/500-Cities-Places/PLACES-ZCTA-Data-GIS-Friendly-Format-2024-release/kee5-23sr",
+        "is_sample": False,
+        "coverage_rule": (
+            "This is the full national ZCTA table indexed by Auctus. "
+            "Describe only statistics present in this profile. "
+            "ZCTA5 is the join key to NYC 311 clean_zip."
+        ),
+        "total_rows": int(total),
+        "primary_key": key,
+        "join": {"auctus_key": "ZCTA5", "fact_key": "clean_zip"},
+        "zcta5_approx_distinct": None if distinct is None else int(distinct),
+        "zcta5_null_or_blank": None if null_key is None else int(null_key),
+        "measure_summaries": measures,
+        "columns": [{"name": name, "spark_type": dtype} for name, dtype in frame.dtypes],
+    }
+    write_json(PROCESSED / "content_profile_auctus.json", profile)
+    return profile
+
+
+def load_auctus_frame(spark) -> DataFrame:
+    parts = sorted(str(path.resolve()) for path in RAW_AUCTUS.glob("part-*.csv"))
+    if not parts:
+        raise FileNotFoundError("Auctus CSV is missing. Run download_auctus_places() first.")
+    return (
+        spark.read.option("header", "true")
+        .option("inferSchema", "false")
+        .option("multiLine", "true")
+        .option("escape", '"')
+        .csv(parts)
+    )
