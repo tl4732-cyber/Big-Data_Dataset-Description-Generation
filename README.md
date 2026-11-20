@@ -27,7 +27,12 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Put `OPENAI_API_KEY` in `.env`. A Socrata app token is optional and only affects rate limits. Do not commit `.env`.
+Configure your LLM provider in `.env`:
+- To use **Google Gemini API** (recommended, fast & free quota): set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY`.
+- To use **OpenAI API**: set `LLM_PROVIDER=openai` and `OPENAI_API_KEY`.
+- To use a **Local LLM** (e.g., Ollama): set `LLM_PROVIDER=local` and `LOCAL_LLM_BASE_URL`.
+
+A Socrata app token is optional and only affects rate limits. Do not commit `.env`.
 
 The default download is a 20,000-row cap inside 1–3 June 2025. That window is the reproducible sample. It is not the full archive. Set `SAMPLE_ROWS=0` and widen `START_DATE` / `END_DATE` only after the sample notebook runs.
 

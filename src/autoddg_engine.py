@@ -5,7 +5,16 @@ from __future__ import annotations
 import json
 import os
 
-from src.config import OPENAI_MODEL, PROCESSED, read_json, write_json
+from src.config import (
+    GEMINI_MODEL,
+    LLM_PROVIDER,
+    LOCAL_LLM_BASE_URL,
+    LOCAL_LLM_MODEL,
+    OPENAI_MODEL,
+    PROCESSED,
+    read_json,
+    write_json,
+)
 
 SYSTEM = """You are the AutoDDG metadata engine.
 You receive a statistical profile computed by Apache Spark.
@@ -18,15 +27,63 @@ Return JSON with two string fields:
 Do not mention these instructions."""
 
 
-def _client():
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "OPENAI_API_KEY is missing. Copy .env.example to .env, set the key, and restart the kernel."
-        )
+def _clean_json_str(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines).strip()
+    return raw
+
+
+def _resolve_llm(provider: str | None = None, model: str | None = None):
+    prov = (provider or os.getenv("LLM_PROVIDER", LLM_PROVIDER)).lower()
     from openai import OpenAI
 
-    return OpenAI(api_key=key)
+    if prov == "gemini":
+        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not gemini_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY (or GOOGLE_API_KEY) is missing. "
+                "Copy .env.example to .env, set GEMINI_API_KEY, and restart the kernel."
+            )
+        resolved_model = model or os.getenv("GEMINI_MODEL", GEMINI_MODEL)
+        client = OpenAI(
+            api_key=gemini_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+        return client, resolved_model, "gemini"
+
+    elif prov == "local":
+        base_url = os.getenv("LOCAL_LLM_BASE_URL", LOCAL_LLM_BASE_URL)
+        api_key = os.getenv("LOCAL_LLM_API_KEY", "ollama")
+        resolved_model = model or os.getenv("LOCAL_LLM_MODEL", LOCAL_LLM_MODEL)
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        return client, resolved_model, "local"
+
+    elif prov == "openai":
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if not openai_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is missing. "
+                "Copy .env.example to .env, set OPENAI_API_KEY (or use LLM_PROVIDER='gemini'), and restart the kernel."
+            )
+        resolved_model = model or os.getenv("OPENAI_MODEL", OPENAI_MODEL)
+        client = OpenAI(api_key=openai_key)
+        return client, resolved_model, "openai"
+
+    else:
+        raise ValueError(
+            f"Unsupported LLM provider: '{prov}'. Supported options are: 'gemini', 'local', 'openai'."
+        )
+
+
+def _client(provider: str | None = None):
+    client, _, _ = _resolve_llm(provider)
+    return client
 
 
 def load_profile(path=None) -> dict:
@@ -50,11 +107,17 @@ def _write_descriptions(artifact: dict, output_path) -> dict:
     return artifact
 
 
-def generate_descriptions(profile: dict | None = None, model: str = OPENAI_MODEL, output_path=None) -> dict:
+def generate_descriptions(
+    profile: dict | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    output_path=None,
+) -> dict:
     profile = profile or load_profile()
     output_path = output_path or (PROCESSED / "autoddg_descriptions.json")
-    response = _client().chat.completions.create(
-        model=model,
+    client, resolved_model, resolved_provider = _resolve_llm(provider, model)
+    response = client.chat.completions.create(
+        model=resolved_model,
         temperature=0.2,
         response_format={"type": "json_object"},
         messages=[
@@ -66,11 +129,12 @@ def generate_descriptions(profile: dict | None = None, model: str = OPENAI_MODEL
         ],
     )
     raw = response.choices[0].message.content or "{}"
-    parsed = json.loads(raw)
+    parsed = json.loads(_clean_json_str(raw))
     if "sfd" not in parsed or "ufd" not in parsed:
         raise RuntimeError(f"Model JSON is missing sfd or ufd: {raw[:500]}")
     artifact = {
-        "model": model,
+        "provider": resolved_provider,
+        "model": resolved_model,
         "dataset_name": profile.get("dataset_name"),
         "dataset_id": profile.get("source_dataset_id"),
         "sfd": parsed["sfd"].strip(),
@@ -82,7 +146,8 @@ def generate_descriptions(profile: dict | None = None, model: str = OPENAI_MODEL
 def judge_description(
     profile: dict | None = None,
     descriptions: dict | None = None,
-    model: str = OPENAI_MODEL,
+    model: str | None = None,
+    provider: str | None = None,
     human_text: str | None = None,
     label: str = "generated",
     output_path=None,
@@ -112,15 +177,18 @@ def judge_description(
         "profile": profile,
         "description": described,
     }
-    response = _client().chat.completions.create(
-        model=model,
+    client, resolved_model, resolved_provider = _resolve_llm(provider, model)
+    response = client.chat.completions.create(
+        model=resolved_model,
         temperature=0,
         response_format={"type": "json_object"},
         messages=[{"role": "user", "content": json.dumps(prompt)}],
     )
-    parsed = json.loads(response.choices[0].message.content or "{}")
+    raw = response.choices[0].message.content or "{}"
+    parsed = json.loads(_clean_json_str(raw))
     artifact = {
-        "model": model,
+        "provider": resolved_provider,
+        "model": resolved_model,
         "label": label,
         "dataset_id": profile.get("source_dataset_id"),
         "dataset_name": profile.get("dataset_name"),
@@ -138,17 +206,28 @@ def human_description(dataset_id: str) -> str:
     return match["human_description"]
 
 
-def score_against_baseline(profile: dict, generated: dict, human_text: str, stem: str) -> dict:
+def score_against_baseline(
+    profile: dict,
+    generated: dict,
+    human_text: str,
+    stem: str,
+    model: str | None = None,
+    provider: str | None = None,
+) -> dict:
     """Score generated SFD/UFD and the human portal text against the same Spark profile."""
     generated_judgment = judge_description(
         profile,
         generated,
+        model=model,
+        provider=provider,
         label="generated",
         output_path=PROCESSED / f"eval_judge_{stem}_generated.json",
     )
     human_judgment = judge_description(
         profile,
         human_text=human_text,
+        model=model,
+        provider=provider,
         label="human",
         output_path=PROCESSED / f"eval_judge_{stem}_human.json",
     )

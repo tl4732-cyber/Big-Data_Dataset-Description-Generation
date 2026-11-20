@@ -80,6 +80,23 @@ SPARK_SHUFFLE_PARTITIONS = os.getenv("SPARK_SHUFFLE_PARTITIONS", "8")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 SOCRATA_APP_TOKEN = os.getenv("SOCRATA_APP_TOKEN", "")
 
+# LLM Provider Configuration
+# Supported providers: "gemini" (default), "local", "openai"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen2.5:7b")
+
+
+def get_active_model(provider: str | None = None) -> str:
+    prov = (provider or LLM_PROVIDER).lower()
+    if prov == "gemini":
+        return GEMINI_MODEL
+    elif prov == "local":
+        return LOCAL_LLM_MODEL
+    return OPENAI_MODEL
+
 
 def write_json(path: Path, payload: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)

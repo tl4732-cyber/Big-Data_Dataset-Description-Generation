@@ -75,7 +75,51 @@ def column_role(name: str) -> str:
     return "categorical"
 
 
+def _configure_windows_env():
+    import os
+    import sys
+    from pathlib import Path
+
+    if sys.platform == "win32":
+        short_exe = sys.executable
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(500)
+            ctypes.windll.kernel32.GetShortPathNameW(sys.executable, buf, 500)
+            if buf.value:
+                short_exe = buf.value
+        except Exception:
+            pass
+        os.environ.setdefault("PYSPARK_PYTHON", short_exe)
+        os.environ.setdefault("PYSPARK_DRIVER_PYTHON", short_exe)
+
+        if "HADOOP_HOME" not in os.environ:
+            from src.config import ROOT
+
+            hadoop_dir = ROOT / "hadoop"
+            bin_dir = hadoop_dir / "bin"
+            winutils_exe = bin_dir / "winutils.exe"
+            hadoop_dll = bin_dir / "hadoop.dll"
+            if not winutils_exe.exists() or not hadoop_dll.exists():
+                try:
+                    import urllib.request
+
+                    bin_dir.mkdir(parents=True, exist_ok=True)
+                    base = "https://raw.githubusercontent.com/cdarlint/winutils/master/hadoop-3.3.6/bin"
+                    if not winutils_exe.exists():
+                        urllib.request.urlretrieve(f"{base}/winutils.exe", winutils_exe)
+                    if not hadoop_dll.exists():
+                        urllib.request.urlretrieve(f"{base}/hadoop.dll", hadoop_dll)
+                except Exception:
+                    pass
+            if winutils_exe.exists():
+                os.environ["HADOOP_HOME"] = str(hadoop_dir)
+                if str(bin_dir) not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = str(bin_dir) + ";" + os.environ.get("PATH", "")
+
+
 def start_spark() -> SparkSession:
+    _configure_windows_env()
     return (
         SparkSession.builder
         .appName("NYC_311_AutoDDG_Pipeline")
