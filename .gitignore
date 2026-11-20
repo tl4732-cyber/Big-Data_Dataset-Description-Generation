@@ -20,3 +20,4 @@ metastore_db/
 notebooks/keys.txt
 derby.log
 *.crc
+hadoop/
